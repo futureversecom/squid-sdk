@@ -1,0 +1,40 @@
+name: "Deploy Squid Ingestor"
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: "Target Environment"
+        required: true
+        type: choice
+        options:
+          - rootnet-au-dev
+          - rootnet-au-prod
+
+permissions:
+  contents: read
+  packages: write
+  pull-requests: read
+
+jobs:
+  build:
+    # needs: validate
+    uses: ./.github/workflows/build-image.yaml
+    secrets: inherit
+    permissions:
+      contents: read
+      packages: write
+      pull-requests: read
+    with:
+      environment: ${{ inputs.environment == 'rootnet-au-dev' && 'porcini' || inputs.environment }}
+
+  flux:
+    needs: build
+    uses: ./.github/workflows/trigger-flux-update.yaml
+    secrets:
+      GH_ACTOR: ${{ secrets.GH_ACTOR }}
+      GH_PAT: ${{ secrets.GH_PAT }}
+    with:
+      project_name: "subsquid-ingestor"
+      environment: ${{ inputs.environment }}
+      image_version: ${{ needs.build.outputs.image_tag }}
+      skip_version_overwrite: false

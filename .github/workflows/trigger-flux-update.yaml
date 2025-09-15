@@ -1,0 +1,73 @@
+name: "Trigger Flux Update"
+
+on:
+  workflow_call:
+    inputs:
+      project_name:
+        required: true
+        type: string
+      environment:
+        required: true
+        type: string
+      image_version:
+        required: true
+        type: string
+      skip_version_overwrite:
+        required: false
+        type: boolean
+        default: false
+      dry_run:
+        required: false
+        type: boolean
+        default: false
+    secrets:
+      GH_ACTOR:
+        required: true
+      GH_PAT:
+        required: true
+
+jobs:
+  trigger-flux:
+    runs-on: ubuntu-latest
+    outputs:
+      PAYLOAD: ${{ steps.generate-payload.outputs.PAYLOAD }}
+    steps:
+      - name: Validate Inputs
+        run: |
+          if [[ ! "${{ inputs.environment }}" =~ ^(rootnet-au-dev|rootnet-au-prod|cicd)$ ]]; then
+            echo "Invalid environment specified"
+            exit 1
+          fi
+      - name: Generate Payload
+        id: generate-payload
+        run: |
+          JSON_PAYLOAD=$(jq -c --null-input \
+          --arg project "${{ inputs.project_name }}" \
+          --arg env_name "${{ inputs.environment }}" \
+          --arg image "${{ inputs.image_version }}" \
+          --arg skip "${{ inputs.skip_version_overwrite }}" \
+          '{
+            project: $project,
+            environment: $env_name,
+            skip_docker_version_overwriting: $skip,
+            docker_image_version: $image
+          }')
+          JSON_STRING_PAYLOAD=$(echo $JSON_PAYLOAD | jq -R)
+          echo "PAYLOAD=$JSON_STRING_PAYLOAD" >> "$GITHUB_OUTPUT"
+
+      - name: Trigger flux-app-tenants
+        uses: convictional/trigger-workflow-and-wait@v1.6.1
+        id: flux_trigger
+        with:
+          owner: futureversecom
+          repo: flux-app-tenants
+          workflow_file_name: main.yaml
+          github_user: ${{ secrets.GH_ACTOR }}
+          github_token: ${{ secrets.GH_PAT }}
+          client_payload: ${{ fromJSON(steps.generate-payload.outputs.PAYLOAD) }}
+
+      - name: Handle Deployment Failure
+        if: failure()
+        run: |
+          echo "Flux update failed. Starting rollback procedure..."
+          # Add rollback logic here
